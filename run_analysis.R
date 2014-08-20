@@ -1,3 +1,6 @@
+require("R.utils")
+
+
 # run_analysis() - This function takes the test and train data from the UCI HAR dataset and merges them.
 # From these datasets, it calculates the average per subject and activity of each measure, and builds a new, clean,
 # much shorter dataset (which is written to a file called Clean_UCI_HAR_Averages.txt in the working directory)
@@ -7,7 +10,11 @@ run_analysis <- function(){
   # We check that the directories with the data files, and the data files themselves, exist
   if(!file.exists("activity_labels.txt") || !file.exists("features.txt") || 
        !checkDataFilesExist("test") || !checkDataFilesExist("train")){
-    stop("Missing directories or data files")
+    #stop("Missing directories or data files")
+    
+    download.file("https://d396qusza40orc.cloudfront.net/getdata%2Fprojectfiles%2FUCI%20HAR%20Dataset.zip", destfile="dataset.zip", method="curl")
+    unzip("dataset.zip")
+    setwd("./UCI HAR Dataset")
   }
 
   # We read the features from the features.txt file
@@ -21,7 +28,8 @@ run_analysis <- function(){
   # We read the test dataset, the activity values (y) and the subject values, and add them as columns to the dataset
   testdata <- readAndJoinDataFiles("test",features)
    
-  # We join both datasets
+  # We join both datasets, modifying the row names so that rbind works
+  #row.names(testdata) <- as.character(max(as.numeric(row.names(traindata)))+as.numeric(row.names(testdata)))
   data <- rbind(traindata,testdata)
   
   # We get only the mean and standard deviation measures (columns), plus the subject and activity (y), from the whole feature set 
@@ -37,12 +45,20 @@ run_analysis <- function(){
   # We create a new dataset with the averages per subject and activity of the variables
   for(i in 1:length(selectedFeatures$V1)){
     varname <- names(selectedData)[[i]]
-    newData[[varname]] <- tapply(selectedData[[varname]],list(selectedData$Activity,selectedData$Subject),mean,na.rm=TRUE)
+    # We calculate the averages, putting it into a data frame with columns for activity, subject and value
+    averages <- as.data.frame(as.table(tapply(selectedData[[varname]],list(selectedData$Activity,selectedData$Subject),mean,na.rm=TRUE)))
+    names(averages) <- c("Activity","Subject",varname)
+    if(length(newData)==0){
+      newData <- averages
+    }
+    else{
+      newData <- merge(newData,averages,all=T)
+    }
   }
   
   
   # We write the new dataset to a text file
-  write.table(newData,"Clean_UCI_HAR_Averages.txt")
+  write.table(newData,"Clean_UCI_HAR_Averages.txt",row.names=F)
 }
 
 # readAndJoinDataFiles - This functions reads all the files related to one dataset (features, activities and subjects),
@@ -52,8 +68,8 @@ readAndJoinDataFiles <- function(strDir,features){
   data <- readStrippingSpaces(paste(strDir,"/X_",strDir,".txt",sep=""),dim(features)[[1]])
   # ...and we change the variable names with more descriptive ones
   names(data) <- features$V2
-  data$Activity <- read.table(paste(strDir,"/y_",strDir,".txt",sep=""),row.names=NULL)
-  data$Subject <- read.table(paste(strDir,"/subject_",strDir,".txt",sep=""),row.names=NULL)
+  data$Activity <- (read.table(paste(strDir,"/y_",strDir,".txt",sep="")))[[1]]
+  data$Subject <- (read.table(paste(strDir,"/subject_",strDir,".txt",sep="")))[[1]]
   data
 }
 
@@ -71,23 +87,30 @@ checkDataFilesExist <- function(strDir){
 
 readStrippingSpaces <- function(datafile,numCols){
   
+  # We count the number of lines to preallocate the data structure we are going to read
+  numLines <- countLines(datafile)
+  
   con  <- file(datafile, open = "r")
   
-  df <- data.frame(row.names=NULL)
+  # Create the numerical matrix structure to hold the values
+  dataMatrix <- matrix(nrow=numLines,ncol=numCols)
   
-  while (length(oneLine <- readLines(con, n = 1, warn = FALSE)) > 0) {
+  # We read each line of values, strip their spaces and convert them to numeric, and add them to the matrix
+  for(i in 1:numLines){
+    oneLine <- readLines(con, n = 1, warn = FALSE)
     myVector <- as.numeric(unlist(strsplit(oneLine,split="\\s+")))
     myVector <- myVector[!is.na(myVector)]
-    
+
     if(length(myVector)!=numCols){
       stop(paste("Error! some row did not have",numCols,"columns:",length(myVector)))
     }
-    df <- rbind(df,myVector)
     
-  } 
+    dataMatrix[i,] <- myVector
+  }
   
   close(con)
   
-  df
-  
+  # We convert the matrix to a data frame
+  df <- data.frame(dataMatrix)
+  df 
 }
